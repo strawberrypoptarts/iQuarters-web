@@ -17,7 +17,7 @@ Reference: `iQuarters-android/iquarters-src/app/src/main/java/com/guille/spring/
 - Shared C# core and presentation files match between iOS and web; platform adapters differ intentionally.
 - Core verification exercises all 13 round collision sets, original replay-camera selection, camera reset, and flick sampling at 30–240 Hz.
 - Presentation verification exercises one/two/four-player end states, scoring and remaining-coin bonus, both help pages, pause-time prop motion, practice, secret round, HUD, contact flash and shadow.
-- Web release publish completed and loaded locally without runtime errors. The iOS device build is separate from the fast compile check.
+- Web release publish completed and loaded locally without runtime errors. iOS build 12 completed as an ad-hoc-signed local IPA for iOS 15+; physical-device launch and rendering remain untested.
 
 ## Highest-priority gaps before a 1:1 claim
 
