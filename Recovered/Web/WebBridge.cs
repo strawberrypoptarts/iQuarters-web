@@ -35,7 +35,7 @@ public static partial class WebBridge {
  if(!sent.TryGetValue(n.WebId,out var previous)||previous!=stamp){sent[n.WebId]=stamp;updates.Add(JsonSerializer.Serialize(new NodeMessage(n.WebId,n.ParentNode?.WebId??0,n.Name,n.SourceId,(uint)n.CategoryBitMask,n.Hidden,n.Opacity,[p.X,p.Y,p.Z],[q.X,q.Y,q.Z,q.W],[s.X,s.Y,s.Z],n.Geometry?.MeshKey,n.Geometry?.Materials.Select(Material).ToArray(),c==null?null:new CameraMessage(c.UsesOrthographicProjection,c.OrthographicScale,c.FieldOfView,c.ZNear,c.ZFar)),RenderJson.Default.NodeMessage));}foreach(var child in n.ChildNodes)Visit(child);}
  foreach(var view in views)Visit(view.Scene.RootNode);
  var roots=views.Select(v=>new RootMessage(v.Scene.RootNode.WebId,v.PointOfView!.WebId)).ToArray();
- var labels=current.View.Descendants().OfType<UILabel>().Select(v=>new LabelMessage(v.WebId,v.Text,v.Frame.X,v.Frame.Y,v.Frame.Width,v.Frame.Height,v.Font.Size,v.TextAlignment==UITextAlignment.Left?"left":"center",v.BackgroundColor?.Rgba)).ToArray();
+ var labels=current.View.Descendants().OfType<UILabel>().Select(v=>new LabelMessage(v.WebId,v.Text,v.Frame.X,v.Frame.Y,v.Frame.Width,v.Frame.Height,v.Font.Size,v.TextAlignment==UITextAlignment.Left?"left":v.TextAlignment==UITextAlignment.Right?"right":"center",v.BackgroundColor?.Rgba,v.TextColor.Rgba)).ToArray();
  return "{\"nodes\":["+string.Join(',',updates)+"],\"roots\":"+JsonSerializer.Serialize(roots,RenderJson.Default.RootMessageArray)+",\"labels\":"+JsonSerializer.Serialize(labels,RenderJson.Default.LabelMessageArray)+"}";
  }
  [JSExport]public static int Verify()=>IQuarters.Verification.VerificationSuite.Run(["/RecoveredAssets"],exhaustive:false);

@@ -23,7 +23,7 @@ public sealed class MainMenuController : UIViewController
     }
     public override void ViewDidAppear(bool animated){base.ViewDidAppear(animated);frameLoop?.Dispose();frameLoop=new(View!.Window?.Screen??UIScreen.MainScreen,dt=>legacy.Tick(dt),display);}
     public override void ViewDidDisappear(bool animated){base.ViewDidDisappear(animated);frameLoop?.Dispose();frameLoop=null;}
-    public override void ViewDidLayoutSubviews(){base.ViewDidLayoutSubviews();if(display==null||View!.Bounds.Width<=0||View.Bounds.Height<=0)return;double scale=Math.Max(100,66.666667*(double)View!.Bounds.Height/(double)View.Bounds.Width);display.ContentScaleFactor=View.Window?.Screen.NativeScale??UIScreen.MainScreen.NativeScale;display.PointOfView!.Camera!.OrthographicScale=scale;var backdrop=legacy.Find("backdrop");if(backdrop!=null){backdrop.Scale=new(33*(float)Math.Max(1,((double)View.Bounds.Width/(double)View.Bounds.Height)/(2d/3)),33,33*(float)(scale/100));}if(screen=="scores")ScoreText();if(loadingLabel!=null)LayoutLoading();}
+    public override void ViewDidLayoutSubviews(){base.ViewDidLayoutSubviews();if(display==null||View!.Bounds.Width<=0||View.Bounds.Height<=0)return;double scale=Math.Max(100,66.666667*(double)View!.Bounds.Height/(double)View.Bounds.Width);display.ContentScaleFactor=View.Window?.Screen.NativeScale??UIScreen.MainScreen.NativeScale;display.PointOfView!.Camera!.OrthographicScale=scale;var backdrop=legacy.Find("backdrop");if(backdrop!=null){backdrop.Scale=new(33*(float)Math.Max(1,((double)View.Bounds.Width/(double)View.Bounds.Height)/(2d/3)),33,33*(float)(scale/100));}if(screen=="scores")ScoreText();if(screen=="about")DrawAbout();if(loadingLabel!=null)LayoutLoading();}
     void Sound(string file){if(GameStorage.Muted)return;audio?.Stop();audio?.Dispose();audio=AVAudioPlayer.FromUrl(NSUrl.FromFilename(LegacyScene.Resource("audio/"+file)));audio?.Play();}
     void ClearText(){foreach(var child in textLayer.Subviews)child.RemoveFromSuperview();}
     void Text(string text,CGRect rect,double size=18)
@@ -55,8 +55,8 @@ public sealed class MainMenuController : UIViewController
         string name=hits.Where(h=>Visible(h.Node)).Select(h=>h.Node.Name??"").FirstOrDefault(n=>n.StartsWith("button_")||n is "itme" or "yes" or "no")??"";
         if(screen=="about"){Home();return;}
         if(name=="")return;Sound("sharedassets0.assets-131.wav");
-        if(screen=="resume") {if(name=="yes"){var saved=GameStorage.Load();if(saved!=null)Start(saved,false);else Home();}else if(name=="no"){GameStorage.ClearSaved();Home();}return;}
-        if(screen=="clear") {if(name=="yes")GameStorage.ClearScores();if(name is "yes" or "no"){legacy.Find("ui_are_you_sure")!.Hidden=true;screen="scores";ScoreText();}return;}
+        if(screen=="resume") {if(name is "yes" or "no"){screen="busy";legacy.Play(legacy.Id("ui_resume"),name=="yes"?"YesClick":"NoClick",()=>{legacy.Find("ui_resume")!.Hidden=true;if(name=="yes"){var saved=GameStorage.Load();if(saved!=null){Start(saved,false);return;}}else GameStorage.ClearSaved();screen="main";});}return;}
+        if(screen=="clear") {if(name is "yes" or "no"){screen="busy";legacy.Play(legacy.Id("ui_are_you_sure"),name=="yes"?"YesClick":"NoClick",()=>{if(name=="yes")GameStorage.ClearScores(roundScores);legacy.Find("ui_are_you_sure")!.Hidden=true;screen="scores";ScoreText();});}return;}
         if(screen=="main") {
             if(name=="button_playnow"){legacy.Find("ui_about")!.Hidden=true;Sequence(["playnowclick","playnowout","gtin"],()=>{screen="type";SetPracticeTexture();});}
             else if(name=="button_highscore"){legacy.Find("ui_about")!.Hidden=true;Sequence(["hiscoreclick","playnowout"],Scores);}
@@ -71,9 +71,9 @@ public sealed class MainMenuController : UIViewController
                 Sequence([clips[count-1],"npout"],()=>Start(new GameSession(count),false));
             }else if(name is "button_button_left" or "button_right_bk")Sequence(["npbackclick","npout","gtin"],()=>screen="type");
         } else if(screen=="scores") {
-            if(name=="button_back_hs")Home();
-            else if(name=="button_clear_hs"){ClearText();legacy.Show("ui_are_you_sure");foreach(var n in legacy.Find("ui_are_you_sure")!.ChildNodes)n.Opacity=1;screen="clear";}
-            else if(name is "button_roundhigh" or "button_highscore"){roundScores=name=="button_roundhigh";ShowScorePanel();}
+            if(name=="button_back_hs")ExitScores();
+            else if(name=="button_clear_hs"){ClearText();legacy.PlayRange(legacy.Id("ui_back_clear"),"Take 001",40f/30,45f/30);legacy.Show("ui_are_you_sure");foreach(var n in legacy.Find("ui_are_you_sure")!.ChildNodes)n.Opacity=1;screen="clear";}
+            else if(name is "button_roundhigh" or "button_highscore"){bool next=name=="button_roundhigh";if(next!=roundScores){ClearText();screen="busy";string old=roundScores?"ui_round_high":"ui_high_high";legacy.PlayRange(legacy.Id(old),"Take 001",50f/30,(roundScores?70f:66f)/30,()=>legacy.Find(old)!.Hidden=true);roundScores=next;ShowScorePanel();}}
         }
     }
     void SetPracticeTexture()
@@ -83,27 +83,60 @@ public sealed class MainMenuController : UIViewController
     void Scores()
     {
         screen="busy";roundScores=false;ClearText();legacy.HideRoots();legacy.Show("backdrop");
-        foreach(var name in new[]{"ui_back_clear","ui_button_high_round","ui_quarter_logo_score"}){legacy.Show(name);foreach(var n in legacy.Find(name)!.ChildNodes)n.Opacity=1;legacy.PlayRange(legacy.Id(name),"Take 001",0,16f/30);}
+        foreach(var name in new[]{"ui_back_clear","ui_button_high_round","ui_quarter_logo_score"}){legacy.Show(name);foreach(var n in legacy.Find(name)!.ChildNodes)n.Opacity=1;legacy.PlayRange(legacy.Id(name),"Take 001",0,(name=="ui_quarter_logo_score"?15f:16f)/30);}
         ShowScorePanel();
     }
     void ShowScorePanel()
     {
-        screen="busy";ClearText();legacy.Find("ui_high_high")!.Hidden=roundScores;legacy.Find("ui_round_high")!.Hidden=!roundScores;
-        string name=roundScores?"ui_round_high":"ui_high_high";legacy.Show(name);foreach(var n in legacy.Find(name)!.ChildNodes)n.Opacity=1;
+        screen="busy";ClearText();
+        SetScoreButtons();string name=roundScores?"ui_round_high":"ui_high_high";legacy.Show(name);foreach(var n in legacy.Find(name)!.ChildNodes)n.Opacity=1;
         legacy.PlayRange(legacy.Id(name),"Take 001",0,(roundScores?30f:22f)/30,()=>{screen="scores";ScoreText();});
+    }
+    void MenuLabel(string value,double x,double y,double width,double height,double size=16,bool right=false,bool center=false)
+    {
+        double w=(double)View!.Bounds.Width,h=(double)View.Bounds.Height,scale=h/(2*PresentationRules.HalfHeight(w,h))*200/480;
+        var label=new UILabel(new CGRect((w-320*scale)/2+x*scale,(h-480*scale)/2+y*scale,width*scale,height*scale)){
+            Text=value,TextColor=UIColor.White,TextAlignment=right?UITextAlignment.Right:center?UITextAlignment.Center:UITextAlignment.Left,
+            Lines=0,Font=UIFont.BoldSystemFontOfSize((nfloat)(size*scale))!,AdjustsFontSizeToFitWidth=true,MinimumScaleFactor=.7f};textLayer.AddSubview(label);
+    }
+    void SetScoreButtons()
+    {
+        var group=legacy.Find("ui_button_high_round")!;
+        foreach(var (name,id) in new[]{("button_highscore",roundScores?26:7),("button_roundhigh",roundScores?19:10)}){
+            var node=group.FindChildNode(name,true)!;var material=(SCNMaterial)node.Geometry!.FirstMaterial!.Copy();node.Geometry.FirstMaterial=material;
+            material.Diffuse.Contents=UIImage.FromFile(LegacyScene.Resource($"textures/sharedassets0.assets-{id}.png"));
+        }
+    }
+    void ExitScores()
+    {
+        screen="busy";ClearText();
+        legacy.PlayRange(legacy.Id("ui_back_clear"),"Take 001",25f/30,29f/30,()=>legacy.PlayRange(legacy.Id("ui_back_clear"),"Take 001",60f/30,65f/30));
+        legacy.PlayRange(legacy.Id("ui_button_high_round"),"Take 001",70f/30,83f/30);
+        legacy.PlayRange(legacy.Id("ui_quarter_logo_score"),"Take 001",55f/30,65f/30);
+        legacy.PlayRange(legacy.Id(roundScores?"ui_round_high":"ui_high_high"),"Take 001",50f/30,(roundScores?70f:66f)/30,()=>Home());
     }
     void ScoreText()
     {
-        ClearText();var rows=GameStorage.Scores;var root=legacy.Find(roundScores?"ui_round_high":"ui_high_high")!;
-        foreach(var node in root.ChildNodes.Where(n=>n.Name?.StartsWith("high_score_bg_")==true)) {
-            if(!int.TryParse(node.Name![^2..],out int index))continue;
-            var p=display.ProjectPoint(node.WorldPosition);string text=roundScores?$"ROUND {index+1}        {GameStorage.RoundScore(index)}":index<rows.Count?$"{rows[index].Name}        {rows[index].Score}":"EMPTY        0";
-            Text(text,new CGRect(View!.Bounds.Width*.17,p.Y-12,View.Bounds.Width*.66,24),Math.Min(20,(double)View.Bounds.Width/23));
+        ClearText();var rows=GameStorage.Scores;
+        if(roundScores){for(int i=0;i<12;i++){
+            MenuLabel("Round",45,90+i*28,100,30);MenuLabel((i+1).ToString(),50,90+i*28,100,30,right:true);MenuLabel(GameStorage.RoundScore(i).ToString(),150,90+i*28,100,30,right:true);
+        }}else for(int i=0;i<10;i++){
+            var entry=i<rows.Count?rows[i]:new ScoreRecord{Name="Empty"};
+            MenuLabel((i+1).ToString(),-130,87+i*34,160,30,right:true);MenuLabel(entry.Name,50,87+i*34,160,30);MenuLabel(entry.Score.ToString(),100,87+i*34,160,30,right:true);
         }
     }
     void About()
     {
-        screen="about";ClearText();legacy.HideRoots();legacy.Show("backdrop");Text("iQuarters\n\nCopyright 2010 iT’s Games\n\nV 1.1.0    06/21/2010",new CGRect(25,View!.Bounds.Height*.25,View.Bounds.Width-50,View.Bounds.Height*.45),20);Text("Tap to return",new CGRect(20,View.Bounds.Height-80,View.Bounds.Width-40,40),14);
+        screen="busy";ClearText();legacy.HideRoots();legacy.Show("backdrop");legacy.Show("ui_about");
+        legacy.Play(legacy.Id("ui_about"),"Click",()=>{screen="about";DrawAbout();});
+    }
+    void DrawAbout()
+    {
+        ClearText();var root=legacy.Find("ui_about")!;foreach(var n in root.ChildNodes)n.Opacity=n.Name=="itme"?0:1;
+        var dim=root.FindChildNode("dimplane",true);if(dim!=null){var pos=dim.Position;pos.Z=-3.1f;dim.Position=pos;var scale=dim.Scale;scale.Z=2.9f;dim.Scale=scale;}
+        MenuLabel("For 25 years, Incredible Technologies has forged a name in the entertainment industry as the innovative thinkers behind some of the world's most popular arcade games.  You probably know us better as the Golden Tee Golf and Silver Strike Bowling guys and now we're pleased to introduce you to our more personal side, ITme.\n\nITme - IT mobile entertainment - is the newest division of the company, and the first one designed to entertain in the palm of your hand.  This new brand of IT will adorn our collection of mobile applications and we guarantee that they'll live up to our name.\n\nOur super-creative developers are going to be busy in the coming months unleashing games, utilities, productivity apps, you name it and you can count on all of them to look and feel great, be easy to use, and, most importantly, work as advertised.",30,30,260,385,12);
+        MenuLabel("Visit www.ITMobileEntertainment.com",0,424,320,20,12,center:true);
+        MenuLabel("V 1.1.0    06/21/2010",8,460,200,20,10);
     }
     void LayoutLoading()
     {
@@ -114,6 +147,7 @@ public sealed class MainMenuController : UIViewController
     }
     async void Start(GameSession session,bool selectRound)
     {
+        if(session.curShotThisRound==0&&session.curRound==0&&session.GetCurrentScore()==0)for(int i=0;i<session.totPlayers;i++)session.SetName(GameStorage.PlayerName(i),i);
         screen="busy";audio?.Stop();ClearText();legacy.HideRoots();legacy.Show("backdrop");
         loadingLabel=new UILabel {Text="Loading...",TextColor=UIColor.White,TextAlignment=UITextAlignment.Left};
         textLayer.AddSubview(loadingLabel);LayoutLoading();

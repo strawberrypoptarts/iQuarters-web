@@ -7,8 +7,10 @@ public sealed class SurfaceMaterial
     public float DynamicFriction=.6f, StaticFriction=.6f, Bounce;
     public int FrictionCombine, BounceCombine;
     public static SurfaceMaterial Read(JsonElement e)=>e.ValueKind==JsonValueKind.Null?new():new(){DynamicFriction=e.GetProperty("dynamicFriction").GetSingle(),StaticFriction=e.GetProperty("staticFriction").GetSingle(),Bounce=e.GetProperty("bounce").GetSingle(),FrictionCombine=e.GetProperty("frictionCombine").GetInt32(),BounceCombine=e.GetProperty("bounceCombine").GetInt32()};
-    // Legacy serialized PhysX combine order: average, minimum, multiply, maximum.
-    public static float Combine(float a,float b,int mode)=>mode switch {1=>Math.Min(a,b),2=>a*b,3=>Math.Max(a,b),_ =>(a+b)*.5f};
+    // Serialized Unity modes: average, multiply, minimum, maximum.
+    public static int Priority(int mode)=>mode switch{2=>1,1=>2,_=>mode};
+    public static int WinningMode(int a,int b)=>Priority(a)>=Priority(b)?a:b;
+    public static float Combine(float a,float b,int mode)=>mode switch {1=>a*b,2=>Math.Min(a,b),3=>Math.Max(a,b),_ =>(a+b)*.5f};
 }
 public sealed class ConvexPiece
 {

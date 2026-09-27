@@ -18,11 +18,14 @@ public static class GameStorage
     public static int Unlocked {get=>Math.Max(1,(int)Prefs.IntForKey("original.unlocked"));set=>Prefs.SetInt(value,"original.unlocked");}
     public static bool Muted {get=>Prefs.BoolForKey("original.muted");set=>Prefs.SetBool(value,"original.muted");}
     public static List<ScoreRecord> Scores {get {try{return JsonSerializer.Deserialize(Prefs.StringForKey("original.scores")??"[]",SaveJson.Default.ListScoreRecord)??[];}catch{return [];}}}
-    public static string AddScore(string name,int score) {string id=Guid.NewGuid().ToString("N");var rows=Scores;rows.Add(new(){Id=id,Name=name,Score=score});rows=rows.OrderByDescending(s=>s.Score).Take(10).ToList();Prefs.SetString(JsonSerializer.Serialize(rows,SaveJson.Default.ListScoreRecord),"original.scores");return id;}
+    public static string AddScore(string name,int score) {if(score<=0)return "";string id=Guid.NewGuid().ToString("N");var rows=Scores;rows.Add(new(){Id=id,Name=name,Score=score});rows=rows.OrderByDescending(s=>s.Score).Take(10).ToList();Prefs.SetString(JsonSerializer.Serialize(rows,SaveJson.Default.ListScoreRecord),"original.scores");return id;}
     public static void RenameScore(string id,string name){var rows=Scores;var row=rows.FirstOrDefault(r=>r.Id==id);if(row==null)return;row.Name=name;Prefs.SetString(JsonSerializer.Serialize(rows,SaveJson.Default.ListScoreRecord),"original.scores");}
-    public static void ClearScores(){Prefs.RemoveObject("original.scores");for(int i=0;i<13;i++)Prefs.RemoveObject("original.round."+i);}
+    public static void ClearScores(bool rounds=false){if(rounds){for(int i=0;i<13;i++){Prefs.RemoveObject("original.round."+i);Prefs.RemoveObject("original.roundname."+i);}}else Prefs.RemoveObject("original.scores");for(int i=0;i<4;i++)Prefs.RemoveObject("original.playername."+i);}
+    public static string PlayerName(int player)=>Prefs.StringForKey("original.playername."+player)??$"PLR{player+1}";
+    public static void SavePlayerName(int player,string name)=>Prefs.SetString(name,"original.playername."+player);
+    public static string RoundName(int round)=>Prefs.StringForKey("original.roundname."+round)??"Empty";
     public static int RoundScore(int round)=>(int)Prefs.IntForKey("original.round."+round);
-    public static void RecordRound(int round,int score){if(score>RoundScore(round))Prefs.SetInt(score,"original.round."+round);}
+    public static void RecordRound(int round,int score,string name="PLR1"){if(round>=12)return;if(score>RoundScore(round)){Prefs.SetInt(score,"original.round."+round);Prefs.SetString(name,"original.roundname."+round);}}
     public static void Save(GameSession session)
     {
         if(session.IsPractice)return;

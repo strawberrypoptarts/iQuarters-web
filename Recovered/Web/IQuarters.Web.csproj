@@ -17,7 +17,7 @@
   <ItemGroup>
     <ProjectReference Include="../Core/IQuarters.Core.csproj" />
     <Compile Include="../Verification/VerificationSuite.cs" Link="VerificationSuite.cs" />
-    <Compile Include="../Presentation/RecoveryViewController.cs;../Presentation/GameplayEffects.cs;../Presentation/GameplayPresentation.cs;../Presentation/AdaptivePresentation.cs;../Presentation/MainMenuController.cs;../Presentation/GameStorage.cs;../Presentation/LegacyScene.cs;../Presentation/LegacyAssetCache.cs" Link="Shared/%(Filename)%(Extension)" />
+    <Compile Include="../Presentation/RecoveryViewController.cs;../Presentation/GameplayEffects.cs;../Presentation/GameplayParity.cs;../Presentation/GameplayPresentation.cs;../Presentation/AdaptivePresentation.cs;../Presentation/MainMenuController.cs;../Presentation/GameStorage.cs;../Presentation/LegacyScene.cs;../Presentation/LegacyAssetCache.cs" Link="Shared/%(Filename)%(Extension)" />
     <WasmExtraFilesToDeploy Include="wwwroot/**" TargetPath="%(RecursiveDir)%(Filename)%(Extension)" />
   </ItemGroup>
 </Project>

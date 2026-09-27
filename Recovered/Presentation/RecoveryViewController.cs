@@ -13,16 +13,16 @@ public sealed partial class GameViewController : UIViewController
     readonly GameSession session;readonly bool selectAtStart;public Action? Quit;
     LegacyScene game=null!,ui=null!;SCNView display=null!,overlay=null!;SCNNode coin=null!;
     List<Collider> activeColliders=[];
-    readonly List<int[]> rounds=[];readonly List<Collider> colliders=[];readonly List<ReplayFrame> recording=[];List<ReplayFrame> replay=[];
+    readonly List<int[]> rounds=[];readonly List<Collider> colliders=[];readonly List<ReplayFrame> recording=[];List<ReplayFrame> replay=[];readonly List<int> frameContacts=[];
     readonly record struct NodePose(int Id,SCNVector3 Position,SCNQuaternion Orientation,SCNVector3 Scale);
-    sealed record ReplayFrame(float Time,NodePose[] Poses,int Ricochets=0);
+    sealed record ReplayFrame(float Time,NodePose[] Poses,int Ricochets=0,int[]? Contacts=null);
     NodePose[] beforeReplay=[];int replayRound,returnRound;float replayTime,cameraT;SCNNode camera=null!;CoinBody coinBody=null!;JsonElement physics,presentation;
     readonly Dictionary<int,int> soundCounts=[];float lastSoundTime=-10;int lastSoundType=-1;
     readonly Dictionary<string,SCNMaterial> digits=[];
     sealed class Collider {public int[] Ancestors=[];public SCNNode Node=null!;public CollisionShape Shape=null!;public SCNVector3[][] Local=[];public SCNMatrix4 LastTransform;public bool HasTransform,Moving;}
     readonly UIView textLayer=new(){UserInteractionEnabled=false};
     NVector3 start;SCNQuaternion orientation;DisplayFrameLoop? frameLoop;NSObject? background,foreground;GameAudio? audio;ShotSimulation? shot;
-    string pauseResumeState="play",state="busy",hitSound="";int round,lastContacts,replayFrame;float delay;float angle {get=>session.shotAngle;set=>session.shotAngle=value;}bool angleInput,shake,transition;CGPoint lastTouch,angleTouch;readonly TimedFlickGesture flick=new();double lastTouchTimestamp;bool adjustingAngle;
+    string pauseResumeState="play",state="busy",hitSound="";int round,replayFrame;float delay;float angle {get=>session.shotAngle;set=>session.shotAngle=value;}bool angleInput,shake;CGPoint lastTouch,angleTouch;readonly TimedFlickGesture flick=new();double lastTouchTimestamp;bool adjustingAngle;
     public GameViewController(GameSession session,bool selectRound){this.session=session;selectAtStart=selectRound;}
     bool prepared;
 #if BROWSER
@@ -51,7 +51,7 @@ public sealed partial class GameViewController : UIViewController
         }
         using var sounds=JsonDocument.Parse(File.ReadAllText(LegacyScene.Resource("audio/manifest.json")));hitSound=sounds.RootElement.EnumerateArray().First(v=>v.GetProperty("name").GetString()=="coin_table_hit1").GetProperty("file").GetString()!;
         presentation=assets.Read("presentation.json");
-        audio=new GameAudio();prepared=true;
+        audio=new GameAudio();session.SecretRoundUnlocked+=()=>EffectSound(580);prepared=true;
 #if BROWSER
     }
 #else
@@ -98,7 +98,7 @@ public sealed partial class GameViewController : UIViewController
         touchView.CancelContact=()=>{flick.Cancel();adjustingAngle=false;};
         background=NSNotificationCenter.DefaultCenter.AddObserver(UIApplication.WillResignActiveNotification,_=>{audio?.Pause();Pause();GameStorage.Save(session);});
         foreground=NSNotificationCenter.DefaultCenter.AddObserver(UIApplication.DidBecomeActiveNotification,_=>audio?.Resume());
-        game.PlayAutomatic();ShowRound(session.curRound);if(selectAtStart)Practice();else BeginRound();
+        InitializeContactFlashes();game.PlayAutomatic();ShowRound(session.curRound);if(selectAtStart)Practice();else BeginRound();
     }
     public override void ViewDidLayoutSubviews()
     {
@@ -112,47 +112,49 @@ public sealed partial class GameViewController : UIViewController
     void Tap(CGPoint point)
     {
         string name=Hit(point);
-        if(state=="help"){ClearText();ui.Find("ui_help")!.Hidden=true;state="pause";return;}
+        if(state=="help"){AdvanceRules();return;}
+        if(state=="replay"&&afterAutomaticReplay!=null){replaySkipped=true;replayTime=replay[^1].Time+1;return;}
+        if(state=="replayDone"){if(name=="button_hs_done")CloseReplay();return;}
+        if(state=="highScores"){if(name=="button_hs_done")CloseInGameScores();return;}
         if(state=="scores"){ClearText();state="pause";return;}
-        if(state=="stats"){if(name=="stats_done")Quit?.Invoke();return;}
+        if(state=="stats"){if(name=="stats_done")CloseStats();return;}
         if(name=="")return;Sound("sharedassets0.assets-131.wav");
         if(state=="select") {
-            if(name=="quit"){Quit?.Invoke();return;}
-            if(name is "select_left" or "select_right") {int direction=name=="select_left"?-1:1;ShowRound((round+direction+12)%12);ui.Play(ui.Id("ui_practice_mode"),direction<0?"leftclick":"rightclick");PracticeLock();}
-            else if(name=="go"&&round<GameStorage.Unlocked){session.curRound=round;session.ClearScores();session.SetAllShotsLeft(40);session.curMadeShotsThisRound=session.curShotThisRound=0;angle=50;ui.Play(ui.Id("ui_practice_mode"),"slideout",BeginRound);}return;
+            if(name=="quit"){state="selectTransition";ui.Find("ui_practice_lock")!.Hidden=true;UiSequence(1106,["quitclick","slideout"],()=>Quit?.Invoke());return;}
+            if(name is "select_left" or "select_right") {int direction=name=="select_left"?-1:1;state="selectTransition";ui.Play(1106,direction<0?"leftclick":"rightclick",()=>{ShowRound((round+direction+12)%12);state="select";PracticeLock();});}
+            else if(name=="go"&&round<GameStorage.Unlocked){session.curRound=round;session.ClearScores();session.SetAllShotsLeft(40);session.curMadeShotsThisRound=session.curShotThisRound=0;angle=50;state="selectTransition";ui.Find("ui_practice_lock")!.Hidden=true;UiSequence(1106,["goclick","slideout"],BeginRound);}return;
         }
         if(state=="pause") {
-            if(name=="button_done"){session.StoreSecretRoundUnlockCode(0);ui.Play(ui.Id("UI_backend_00"),"animout",()=>{ui.Find("UI_backend_00")!.Hidden=true;ui.Find("ui_help")!.Hidden=true;SetPauseBackdrop(false);state=pauseResumeState;});}
-            else if(name=="button_quit"){GameStorage.Save(session);Quit?.Invoke();}
-            else if(name=="sound_off"){GameStorage.Muted=!GameStorage.Muted;session.StoreSecretRoundUnlockCode(GameStorage.Muted?1:2);Texture(ui.Find("UI_backend_00")!.ChildNodes.First(n=>n.Name=="sound_off"),GameStorage.Muted?18:24);}
-            else if(name is "button_shake" or "button_flick"){shake=name=="button_shake";session.SetCurrentInputType(shake?0:1);ui.Play(ui.Id("UI_backend_00"),shake?"shakeclick":"flickclick");}
-            else if(name=="button_replay"&&replay.Count>0&&shot==null){beforeReplay=Capture();returnRound=round;ShowRound(replayRound);ui.Find("UI_backend_00")!.Hidden=true;ui.Find("ui_help")!.Hidden=true;SetPauseBackdrop(false);replayFrame=0;replayTime=0;UseReplayCamera();state="replay";}
-            else if(name=="help"){session.StoreSecretRoundUnlockCode(3);state="help";Text("FLICK UP TO SHOOT\nDRAG TO AIM\n\nLAND QUARTERS IN GLASSES\nRICOCHETS INCREASE YOUR SCORE\n\nTap to return",.28f,.44f);}
-            else if(name=="hall_of_fame"){state="scores";Text("HIGH SCORES\n\n"+string.Join("\n",GameStorage.Scores.Select((s,i)=>$"{i+1}.  {s.Name}    {s.Score}"))+"\n\nTap to return",.25f,.5f);}return;
+            if(name=="button_done"){session.StoreSecretRoundUnlockCode(0);LeavePause("doneclick",()=>{SetPauseBackdrop(false);state=pauseResumeState;if(state=="play"&&shot==null)ShowShotHud();});}
+            else if(name=="button_quit"){session.StoreSecretRoundUnlockCode(6);LeavePause("quitclick",()=>{GameStorage.ClearSaved();Quit?.Invoke();});}
+            else if(name=="sound_off"){GameStorage.Muted=!GameStorage.Muted;session.StoreSecretRoundUnlockCode(GameStorage.Muted?1:2);ui.Play(1882,"soundclick");Texture(ui.Find("UI_backend_00")!.ChildNodes.First(n=>n.Name=="sound_off"),GameStorage.Muted?18:24);}
+            else if(name=="button_replay"&&replay.Count>0&&shot==null){session.StoreSecretRoundUnlockCode(5);LeavePause("flickclick",RequestedReplay);}
+            else if(name=="help"){session.StoreSecretRoundUnlockCode(3);OpenRules();}
+            return;
         }
         if(state is "play" or "wait" or "effects") {
-            if(name=="button_pause")Pause();
-            else if(state=="play"&&shot==null&&name is "button_angle" or "button_done2") {angleInput=!angleInput;var done=ui.Find("UI_ingame_angle")!.ChildNodes.First(n=>n.Name=="button_done2");done.Opacity=angleInput?1:0;}
+            if(name=="button_pause"&&state=="play"&&shot==null&&!angleInput){session.ResetUserSecretCodes();state="pauseClick";ui.PlayDefault(1835,()=>{state="play";Pause();});}
+            else if(state=="play"&&shot==null&&name is "button_angle" or "button_done2") {angleInput=!angleInput;shotHud.PressAngle();shotHud.HolderVisible(!angleInput);var done=ui.Find("UI_ingame_angle")!.ChildNodes.First(n=>n.Name=="button_done2");done.Opacity=angleInput?1:0;}
         }
     }
     void Texture(SCNNode n,int id){if(n.Geometry!=null){n.Geometry.FirstMaterial=(SCNMaterial)n.Geometry.FirstMaterial!.Copy();n.Geometry.FirstMaterial.Diffuse.Contents=UIImage.FromFile(LegacyScene.Resource($"textures/sharedassets1.assets-{id}.png"));}}
     float pauseIntroElapsed;bool pauseBackdropPending;
     void SetPauseBackdrop(bool visible){var backdrop=ui.Nodes[1825];backdrop.Hidden=!visible;backdrop.Opacity=visible?1:0;if(!visible)pauseBackdropPending=false;}
-    void Pause(){if(state is "pause" or "stats" or "select" or "names")return;flick.Cancel();pauseResumeState=state;state="pause";pauseIntroElapsed=0;pauseBackdropPending=true;ui.Show("UI_backend_00");ui.Play(ui.Id("UI_backend_00"),"animin");Texture(ui.Find("UI_backend_00")!.ChildNodes.First(n=>n.Name=="sound_off"),GameStorage.Muted?18:24);Texture(ui.Find("UI_backend_00")!.ChildNodes.First(n=>n.Name=="button_replay"),replay.Count>0&&shot==null?69:17);ui.Show("ui_help");foreach(var n in ui.Find("ui_help")!.ChildNodes)n.Opacity=n.Name=="help"?1:0;}
-    void ClearText(){foreach(var v in textLayer.Subviews)v.RemoveFromSuperview();}
+    void Pause(){if(state is not ("play" or "effects" or "replay"))return;flick.Cancel();pauseResumeState=state;HideShotHud();state="pause";pauseIntroElapsed=0;pauseBackdropPending=true;ui.Show("UI_backend_00");ui.Play(ui.Id("UI_backend_00"),"animin");Texture(ui.Find("UI_backend_00")!.ChildNodes.First(n=>n.Name=="sound_off"),GameStorage.Muted?18:24);Texture(ui.Find("UI_backend_00")!.ChildNodes.First(n=>n.Name=="button_replay"),replay.Count>0&&shot==null?69:17);ui.Show("ui_help");foreach(var n in ui.Find("ui_help")!.ChildNodes)n.Opacity=n.Name=="help"?1:0;}
+    void ClearText(){originalLabels.Clear();foreach(var v in textLayer.Subviews)v.RemoveFromSuperview();}
     void Text(string value,float top,float height){ClearText();var l=new UILabel(new CGRect(20,View!.Bounds.Height*top,View.Bounds.Width-40,View.Bounds.Height*height)){Text=value,TextColor=UIColor.White,BackgroundColor=UIColor.FromWhiteAlpha(0,.8f),TextAlignment=UITextAlignment.Center,Lines=0,Font=UIFont.BoldSystemFontOfSize(18)!,AdjustsFontSizeToFitWidth=true};textLayer.AddSubview(l);}
-    void Practice(){state="select";ui.HideRoots();ui.Show("ui_practice_mode");ui.Play(ui.Id("ui_practice_mode"),"slidein");PracticeLock();}
-    void PracticeLock(){ClearText();if(round>=GameStorage.Unlocked)Text($"ROUND {round+1} LOCKED",.4f,.1f);else Text($"ROUND {round+1}    BEST {GameStorage.RoundScore(round)}",.18f,.06f);}
+    void Practice(){state="selectTransition";ClearText();ui.HideRoots();coin.Hidden=true;ui.Show("ui_practice_mode");ui.Play(1106,"slidein",()=>{state="select";PracticeLock();});}
+    void PracticeLock(){ClearText();Label($"Hi Score  {GameStorage.RoundScore(round)}",90,46,180,40);var locked=ui.Find("ui_practice_lock")!;if(round>=GameStorage.Unlocked){ui.Show("ui_practice_lock");ui.Play(1254,"lockin");}else locked.Hidden=true;}
     void BeginRound()
     {
         ClearText();ui.HideRoots();foreach(var name in new[]{"UI_pause","UI_ingame_player","ui_ingame_3coin_hold","ui_ingame_angle_root","ex_round_mon"})ui.Show(name);
-        ui.Find("ui_ingame_3coin_hold")!.Position=new(0,0,0);
-        ui.Find("ui_ingame_angle_root")!.Position=new(33.5f,0,0);
+        InitializeShotHud();
         ui.Sample(ui.Id("UI_pause"),"Take 001",1);ui.Nodes[1829].Opacity=0;ui.Sample(ui.Id("UI_ingame_angle"),"hold",0);
         foreach(var n in ui.Find("UI_ingame_angle")!.ChildNodes)if(n.Name is "button_done" or "button_done2")n.Opacity=0;
         ui.Play(ui.Id("UI_ingame_player"),$"player{session.curPlayer+1}");
-        ui.PlayRange(ui.Id("ex_round_mon"),"Take 001",0,.4f);
-        state="effects";After(.5f,()=>state="play");angleInput=false;shake=session.GetCurrentInputType()==0;ResetCoin();Hud();GameStorage.Save(session);
+        angleInput=false;shake=session.GetCurrentInputType()==0;coin.Hidden=false;ResetCoin();Hud();
+        if(!session.IsPractice)PlayExciter(1187,shake?"shake":"flick");
+        state="effects";After(.5f,()=>{state="play";ShowShotHud();});GameStorage.Save(session);
     }
     void Hud()
     {
@@ -192,56 +194,74 @@ public sealed partial class GameViewController : UIViewController
     }
     void Shoot(float power,float aim)
     {
-        if(state!="play"||shot!=null||angleInput)return;MoveColliders();shot=new(start,power,angle,aim,activeColliders.Select(c=>c.Shape).ToList(),body:coinBody);shot.ReactionTriggered+=React;recording.Clear();recording.Add(new(0,Capture()));soundCounts.Clear();lastSoundType=-1;lastSoundTime=-10;lastContacts=0;SlideBannerOut();Sound("sharedassets1.assets-580.wav");
+        if(state!="play"||shot!=null||angleInput)return;MoveColliders();shot=new(start,power,angle,aim,activeColliders.Select(c=>c.Shape).ToList(),body:coinBody);shot.ReactionTriggered+=React;shot.ContactEntered+=(shape,point)=>{frameContacts.Add(shape.ColliderId);CollisionSound(shape);ContactFlash(point);};recording.Clear();recording.Add(new(0,Capture()));soundCounts.Clear();lastSoundType=-1;lastSoundTime=-10;HideShotHud();Sound("sharedassets1.assets-580.wav");
     }
     void Tick(float dt)
     {
-        if(state is "pause" or "help" or "scores"){ui.Tick(dt,ui.Id("UI_backend_00"));if(pauseBackdropPending){pauseIntroElapsed+=dt;if(pauseIntroElapsed>.25f){SetPauseBackdrop(true);pauseBackdropPending=false;}}return;}
-        if(state is "stats" or "names"){ui.Tick(dt);return;}
+        shotHud.Tick(dt);ApplyShotHud();
+        if(state is "pause" or "help" or "scores" or "pauseTransition"){ui.Tick(dt);if(pauseBackdropPending){pauseIntroElapsed+=dt;if(pauseIntroElapsed>.25f){SetPauseBackdrop(true);pauseBackdropPending=false;}}return;}
+        if(state is "stats" or "names" or "statsTransition" or "highScores" or "scoreTransition" or "replayDone" or "replayDoneTransition"){ui.Tick(dt);return;}
         ui.Tick(dt);
         if(state=="replay"){
-            replayTime+=dt;while(replayFrame+1<replay.Count&&replay[replayFrame+1].Time<=replayTime)replayFrame++;
-            Restore(replay[replayFrame].Poses);UpdateCameraAndShadow(dt);
+            replayTime+=dt;while(replayFrame+1<replay.Count&&replay[replayFrame+1].Time<=replayTime){replayFrame++;foreach(int id in replay[replayFrame].Contacts??[]){CollisionSound(colliders.FirstOrDefault(c=>c.Shape.ColliderId==id)?.Shape,replay[replayFrame].Time);var pose=replay[replayFrame].Poses.FirstOrDefault(p=>p.Id==game.Id("a_quarter5"));ContactFlash(new NVector3(pose.Position.X,pose.Position.Y,pose.Position.Z));}}
+            Restore(replay[replayFrame].Poses);UpdateCameraAndShadow(dt);TickParity(dt);
             if(afterAutomaticReplay!=null)ReplayContactEffect(replay[replayFrame].Ricochets);
-            if(replayTime>replay[^1].Time+.5f){RestoreGameCamera();ShowRound(returnRound);Restore(beforeReplay);MoveColliders();if(afterAutomaticReplay is {} completed){afterAutomaticReplay=null;state="effects";completed();}else{state="play";Pause();}}return;
+            if(replayTime>replay[^1].Time)FinishReplay();return;
         }
-        game.Tick(dt);UpdateCameraAndShadow(dt);TickEffects(dt);
+        game.Tick(dt);UpdateCameraAndShadow(dt);TickEffects(dt);TickParity(dt);
+        if(state is "select" or "selectTransition"){game.Nodes[1962].Hidden=true;return;}
         if(state=="practiceResult"){delay-=dt;if(delay<=0)Practice();return;}
-        var banner=ui.Find("ex_round_mon")!;var marker=banner.ChildNodes.First(n=>n.Name=="round_move_marker");foreach(var n in banner.ChildNodes)if(n.Name=="round_graphic"||n.Name==(round==12?"secret":$"{round+1:00}"))n.Position=n.Name=="round_graphic"?new(marker.Position.X,n.Position.Y,n.Position.Z):marker.Position;
-        if(!banner.Hidden){var number=banner.ChildNodes.FirstOrDefault(n=>n.Name==(round==12?"secret":$"{round+1:00}"));if(number!=null){var e=number.EulerAngles;e.Y-=dt*100*MathF.PI/180;number.EulerAngles=e;}}
+        ApplyShotHud();
         if(state=="effects")return;
-        if(state=="wait"){delay-=dt;if(delay<=0){if(transition){ShowRound(session.curRound);BeginRound();}else{ResetCoin();state="play";Hud();SlideBannerIn();}}return;}
+
         if(shot==null&&state=="play"&&shake&&!angleInput&&motion.AccelerometerData is {} sample&&sample.Timestamp>lastMotionTime){lastMotionTime=sample.Timestamp;var a=sample.Acceleration;if(ShakeGesture.Sample(new((float)a.X,(float)a.Y,(float)a.Z),out var power,out var aim))Shoot(power,aim);}
-        if(shot==null)return;MoveColliders(dt);shot.Advance(dt);var p=shot.Position;coin.Position=new(p.X,p.Y,p.Z);var rotation=shot.Orientation;coin.Orientation=new(rotation.X,rotation.Y,rotation.Z,rotation.W);recording.Add(new(shot.Elapsed,Capture(),shot.Ricochets));
-        if(shot.ContactCount>lastContacts){lastContacts=shot.ContactCount;CollisionSound(shot.LastContact);}
+        if(shot==null)return;frameContacts.Clear();MoveColliders(dt);shot.Advance(dt);var p=shot.Position;coin.Position=new(p.X,p.Y,p.Z);var rotation=shot.Orientation;coin.Orientation=new(rotation.X,rotation.Y,rotation.Z,rotation.W);recording.Add(new(shot.Elapsed,Capture(),shot.Ricochets,frameContacts.ToArray()));
         if(!shot.Finished)return;
         var finished=shot;replay=new(recording);replayRound=round;shot=null;
         CelebrateShot(finished);
     }
     void CommitShot(int multiplier)
     {
-        int oldPlayer=session.curPlayer;var player=(PlayerInfoClass)session.playerData[oldPlayer]!;
+        int oldPlayer=session.curPlayer,oldRound=round;var player=(PlayerInfoClass)session.playerData[oldPlayer]!;
         int roundScore=player.roundScore;bool newHigh=roundScore>GameStorage.RoundScore(round);
-        int flags=session.IsPractice?0:session.UpdateShotCount(multiplier);
-        if(session.IsPractice){session.curShotThisRound++;if(multiplier>0)session.curMadeShotsThisRound++;else session.DecrementCurrentShotsLeft();
-            if(session.curMadeShotsThisRound>=3||session.GetCurrentShotsLeft()==0){
-                if(session.GetCurrentShotsLeft()==0)GameOverEffect(true,Practice);
-                else if(newHigh){GameStorage.RecordRound(round,roundScore);PracticeScoreEffect(roundScore,Practice);}
-                else RoundCompleteEffect(roundScore,false,Practice);return;}}
-        bool completedRound=multiplier>0&&((flags&session.flagPlayerChange)!=0||(flags&session.flagRoundChange)!=0||(flags&session.flagPlayerGameOver)!=0);
-        if(completedRound){GameStorage.RecordRound(round,roundScore);GameStorage.Unlocked=Math.Max(GameStorage.Unlocked,Math.Min(12,round+1));}
-        if((flags&session.flagPlayerGameOver)!=0&&(flags&session.flagOutOfShotsReason)==0)session.AddPlayerScore(player.shotsLeft*5,oldPlayer);
-        if((flags&session.flagPlayerGameOver)!=0&&player.recoveredScoreId=="")player.recoveredScoreId=GameStorage.AddScore(player.playerName,player.score);
-        if((flags&session.flagGameOver)!=0){if(completedRound)RoundCompleteEffect(roundScore,newHigh,()=>GameOverEffect(false,Stats));else GameOverEffect(true,Stats);return;}
-        transition=session.curRound!=round||session.curPlayer!=oldPlayer;if(transition)angle=50;Hud();GameStorage.Save(session);state="wait";delay=.3f;
-        if(completedRound)RoundCompleteEffect(roundScore,newHigh,()=>{state="wait";delay=.3f;});
-        else if((flags&session.flagPlayerGameOver)!=0)GameOverEffect(true,()=>{state="wait";delay=.3f;});
+        if(session.IsPractice){
+            session.curShotThisRound++;if(multiplier>0)session.curMadeShotsThisRound++;else session.DecrementCurrentShotsLeft();
+            if(session.GetCurrentShotsLeft()==0){GameOverEffect(true,Practice);return;}
+            if(session.curMadeShotsThisRound>=3){
+                // Android's practice "great score" is informational; it does not write Classic round records.
+                if(newHigh)PracticeScoreEffect(roundScore,Practice);else Practice();return;
+            }
+            ResetCoin();state="play";Hud();ShowShotHud();return;
+        }
+        int flags=session.UpdateShotCount(multiplier);
+        bool ended=(flags&session.flagPlayerGameOver)!=0,allEnded=(flags&session.flagGameOver)!=0;
+        bool outOfCoins=(flags&session.flagOutOfShotsReason)!=0;
+        bool completedRound=multiplier>0&&flags!=0;
+        if(completedRound){GameStorage.RecordRound(oldRound,roundScore,player.playerName);GameStorage.Unlocked=Math.Max(GameStorage.Unlocked,Math.Min(12,oldRound+1));}
+        if(ended&&!outOfCoins)session.AddPlayerScore(player.shotsLeft*5,oldPlayer);
+        if(ended&&player.recoveredScoreId=="")player.recoveredScoreId=GameStorage.AddScore(player.playerName,player.score);
+        if(allEnded)GameStorage.ClearSaved();else GameStorage.Save(session);
+        void ContinueGame(){
+            SetPauseBackdrop(false);
+            if(allEnded){Stats();return;}
+            if(flags!=0){angle=50;ShowRound(session.curRound);BeginRound();}
+            else {ResetCoin();state="play";Hud();ShowShotHud();}
+        }
+        void AfterRound(){
+            if(ended){GameOverEffect(outOfCoins,()=>StackBonus(player.shotsLeft,()=>PlayerHighScore(oldPlayer,ContinueGame)));}
+            else ContinueGame();
+        }
+        if(completedRound){
+            shotHud.Hide();
+            if(oldRound==12)SecretRoundEffect(false,AfterRound);
+            else if(oldRound==8&&session.secretRoundUnlocked)SecretRoundEffect(true,AfterRound);
+            else RoundCompleteEffect(roundScore,newHigh,AfterRound);
+        }else if(ended)AfterRound();else ContinueGame();
     }
     void Stats()
     {
-        state="stats";GameStorage.ClearSaved();ui.HideRoots();ui.Show("ui_stats");int count=session.playerData.Count;
-        foreach(var p in session.playerData.Cast<PlayerInfoClass>())if(p.recoveredScoreId=="")p.recoveredScoreId=GameStorage.AddScore(p.playerName,p.score);
-        ui.Play(ui.Id("ui_stats"),$"ui_in_{count}",()=>PromptNames(0));
+        state="statsTransition";GameStorage.ClearSaved();ClearText();ui.HideRoots();SetPauseBackdrop(true);ui.Show("ui_stats");
+        ui.Play(128,$"ui_in_{session.totPlayers}",()=>{state="stats";DrawStats();});
     }
     void ResetCoin(){coin.Position=new(start.X,start.Y,start.Z);coin.Orientation=orientation;FollowMainCamera(1,true);}
     void Sound(string file){if(!GameStorage.Muted)audio?.Play(file);}

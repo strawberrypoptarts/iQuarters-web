@@ -102,6 +102,8 @@ public sealed partial class LegacyScene
         if(!bindings.TryGetValue(owner,out var b)||!b.TryGetValue(name,out var key)){complete?.Invoke();return;}
         playing.RemoveAll(p=>p.Owner==owner);playing.Add(new Playback {Owner=owner,Clip=clips[key],Time=start,End=end,Complete=complete});Apply(owner,clips[key],start);
     }
+    public bool IsPlaying(int owner)=>playing.Any(p=>p.Owner==owner);
+    public float Duration(int owner,string name)=>bindings.TryGetValue(owner,out var b)&&b.TryGetValue(name,out var key)?clips[key].GetProperty("duration").GetSingle():0;
     public void Sample(int owner,string name,float time)
     {
         if(bindings.TryGetValue(owner,out var b)&&b.TryGetValue(name,out var key))Apply(owner,clips[key],time);

@@ -43,6 +43,7 @@ public sealed class ShotSimulation
     public int ContactCount {get;private set;}
     public CollisionShape? LastContact {get;private set;}
     public event Action<int>? ReactionTriggered;
+    public event Action<CollisionShape,Vector3>? ContactEntered;
     readonly List<CollisionShape> shapes;readonly CoinBody body;readonly CollisionChain chain=new();
     readonly Dictionary<CollisionShape,float> lastContacts=[];readonly Dictionary<int,float> lastReactions=[];
     readonly (Vector3[] Vertices,Vector3[] Normals,Vector3[] Edges)[] transformed;
@@ -90,11 +91,11 @@ public sealed class ShotSimulation
                 // Native OnCollisionStay tests contact.normal.y > .05 (not separation).
                 bool entered=!lastContacts.TryGetValue(shape,out float last)||Elapsed-last>.012f;lastContacts[shape]=Elapsed;
                 if(!entered&&normal.Y>.05f){supportedMultiplier=shape.Multiplier;ScoringOwner=shape.Owner;}
-                if(incoming<0){int mode=Math.Max(body.Material.BounceCombine,shape.Material.BounceCombine);float bounce=Math.Abs(incoming)<3?0:SurfaceMaterial.Combine(body.Material.Bounce,shape.Material.Bounce,mode);
+                if(incoming<0){int mode=SurfaceMaterial.WinningMode(body.Material.BounceCombine,shape.Material.BounceCombine);float bounce=Math.Abs(incoming)<3?0:SurfaceMaterial.Combine(body.Material.Bounce,shape.Material.Bounce,mode);
                     float impulse=-(1+bounce)*incoming/EffectiveMass(arm,normal);Impulse(normal*impulse,arm);
-                    var tangent=relative-incoming*normal;float length=tangent.Length();if(length>.00001f){tangent/=length;float frictionImpulse=length/EffectiveMass(arm,tangent);int fm=Math.Max(body.Material.FrictionCombine,shape.Material.FrictionCombine);float sf=SurfaceMaterial.Combine(body.Material.StaticFriction,shape.Material.StaticFriction,fm),df=SurfaceMaterial.Combine(body.Material.DynamicFriction,shape.Material.DynamicFriction,fm);if(frictionImpulse>sf*impulse)frictionImpulse=df*impulse;Impulse(-tangent*frictionImpulse,arm);}
+                    var tangent=relative-incoming*normal;float length=tangent.Length();if(length>.00001f){tangent/=length;float frictionImpulse=length/EffectiveMass(arm,tangent);int fm=SurfaceMaterial.WinningMode(body.Material.FrictionCombine,shape.Material.FrictionCombine);float sf=SurfaceMaterial.Combine(body.Material.StaticFriction,shape.Material.StaticFriction,fm),df=SurfaceMaterial.Combine(body.Material.DynamicFriction,shape.Material.DynamicFriction,fm);if(frictionImpulse>sf*impulse)frictionImpulse=df*impulse;Impulse(-tangent*frictionImpulse,arm);}
                 }
-                if(entered){ContactCount++;LastContact=shape;if(launched)chain.Add(shape.ColliderId,shape.Owner,Elapsed-.08f);
+                if(entered){ContactCount++;LastContact=shape;if(launched){chain.Add(shape.ColliderId,shape.Owner,Elapsed-.08f);ContactEntered?.Invoke(shape,point);}
                     if(shape.LaunchVelocity is {} launch&&normal.Y>shape.LaunchNormalThreshold&&(!lastReactions.TryGetValue(shape.ReactionOwner,out float reactionTime)||Elapsed-reactionTime>.1f)){Velocity=launch;timeout+=shape.ExtraShotTime;lastReactions[shape.ReactionOwner]=Elapsed;ReactionTriggered?.Invoke(shape.ReactionOwner);}}
             }
         }

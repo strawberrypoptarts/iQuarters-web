@@ -17,6 +17,7 @@ public sealed partial class GameViewController
     }
     void LayoutGame()
     {
+        LayoutOriginalLabels();
         double w=(double)View!.Bounds.Width,h=(double)View.Bounds.Height;if(w<=0||h<=0)return;
         double half=PresentationRules.HalfHeight(w,h),halfWidth=half*w/h,unit=2*half/h;
         var safe=View.SafeAreaInsets;
@@ -41,6 +42,7 @@ public sealed partial class GameViewController
     float replayDamping=2; double replayFieldOfView=55;
     void UseReplayCamera()
     {
+        soundCounts.Clear();lastSoundType=-1;lastSoundTime=-10;
         if(!usingReplayCamera){savedCameraPosition=camera.Position;savedCameraOrientation=camera.Orientation;}
         int selected=PresentationRules.ReplayCamera(replayRound,nextReplayCamera);
         nextReplayCamera=selected==3?1:selected+1;
