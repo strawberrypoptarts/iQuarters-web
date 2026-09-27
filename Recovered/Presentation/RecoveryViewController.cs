@@ -199,7 +199,7 @@ public sealed partial class GameViewController : UIViewController
     void Tick(float dt)
     {
         shotHud.Tick(dt);ApplyShotHud();
-        if(state is "pause" or "help" or "scores" or "pauseTransition"){ui.Tick(dt);if(pauseBackdropPending){pauseIntroElapsed+=dt;if(pauseIntroElapsed>.25f){SetPauseBackdrop(true);pauseBackdropPending=false;}}return;}
+        if(state is "pause" or "help" or "scores" or "pauseTransition"){ui.Tick(dt);if(pauseResumeState=="play"&&shot==null)game.Tick(dt);if(pauseBackdropPending){pauseIntroElapsed+=dt;if(pauseIntroElapsed>.25f){SetPauseBackdrop(true);pauseBackdropPending=false;}}return;}
         if(state is "stats" or "names" or "statsTransition" or "highScores" or "scoreTransition" or "replayDone" or "replayDoneTransition"){ui.Tick(dt);return;}
         ui.Tick(dt);
         if(state=="replay"){
